@@ -8,22 +8,26 @@ import subprocess
 from typing import List, Set, Optional
 
 
-# ----------------- URL TEMİZLEYİCİ -----------------
+# ----------------- URL CLEANER -----------------
 
 def clean_google_href(href: Optional[str]) -> Optional[str]:
+    """
+    Cleans Google redirect/translation URLs and extracts the REAL URL.
+    Returns None if the link belongs to Google itself.
+    """
     if not href:
         return None
 
     p = urlparse(href)
     domain = p.netloc
 
-    # 1) translate.google domainleri temizle
+    # translate.google.* → u parameter contains real URL
     if domain.startswith("translate.google."):
         qs = parse_qs(p.query)
         if "u" in qs and qs["u"]:
             return qs["u"][0]
 
-    # 2) google.com/url redirect temizle
+    # google.com/url → q or url parameters contain real URL
     if domain.startswith("www.google.") and p.path == "/url":
         qs = parse_qs(p.query)
         if "q" in qs and qs["q"]:
@@ -31,45 +35,54 @@ def clean_google_href(href: Optional[str]) -> Optional[str]:
         if "url" in qs and qs["url"]:
             return qs["url"][0]
 
-    # 3) Google linklerini tamamen at
+    # Ignore all Google-owned URLs
     if "google." in domain:
         return None
 
     return href
 
 
-# ----------------- SESSİZ CHROME BAŞLAT -----------------
+# ----------------- QUIET CHROME SETUP -----------------
 
 def get_silent_driver() -> webdriver.Chrome:
     chrome_options = Options()
     chrome_options.add_argument("--log-level=3")
     chrome_options.add_argument("--disable-logging")
     chrome_options.add_argument("--silent")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
+
+    chrome_options.add_experimental_option(
+        "excludeSwitches", ["enable-logging", "enable-automation"]
+    )
     chrome_options.add_experimental_option("useAutomationExtension", False)
 
     service = Service(log_output=subprocess.DEVNULL)
+
     driver = webdriver.Chrome(service=service, options=chrome_options)
     return driver
 
 
-# ----------------- GLOBAL VERİ -----------------
+# ----------------- GLOBAL STORAGE -----------------
 
 results: List[str] = []
 seen: Set[str] = set()
 
 
-# ----------------- SAYFADAN URL TOPLAMA -----------------
+# ----------------- SCRAPE CURRENT PAGE -----------------
 
 def scrape_current_page(driver: webdriver.Chrome) -> bool:
+    """
+    Extracts organic search result URLs from the current Google search page.
+    Returns False if no results exist (CAPTCHA or blocked page).
+    """
+
     elements = driver.find_elements(By.CSS_SELECTOR, "div.MjjYud div.yuRUbf a")
 
     if not elements:
-        print("[!] Organik sonuç bulunamadı → Muhtemelen CAPTCHA veya blok.")
-        print("[!] CAPTCHA'yı çöz ve tekrar 'auto' yaz.\n")
+        print("[!] No organic results found → CAPTCHA or block detected.")
+        print("[!] Solve CAPTCHA manually and run 'auto' again.\n")
         return False
 
-    yeni = []
+    new_urls = []
 
     for el in elements:
         raw = el.get_attribute("href")
@@ -80,13 +93,13 @@ def scrape_current_page(driver: webdriver.Chrome) -> bool:
         if clean not in seen:
             seen.add(clean)
             results.append(clean)
-            yeni.append(clean)
+            new_urls.append(clean)
 
-    print(f"[*] Bu sayfadan {len(yeni)} yeni URL eklendi. Toplam: {len(results)}")
+    print(f"[*] Added {len(new_urls)} new URLs. Total collected: {len(results)}")
     return True
 
 
-# ----------------- NEXT BUTONU -----------------
+# ----------------- FIND NEXT BUTTON -----------------
 
 def get_next_button(driver: webdriver.Chrome):
     selectors = [
@@ -94,7 +107,7 @@ def get_next_button(driver: webdriver.Chrome):
         (By.CSS_SELECTOR, "a#pnnext"),
         (By.CSS_SELECTOR, "a.LLNLxf#pnnext"),
         (By.XPATH, "//a[@id='pnnext']"),
-        (By.XPATH, "//a[contains(text(),'Next')]")
+        (By.XPATH, "//a[contains(text(),'Next')]"),
     ]
 
     for by, sel in selectors:
@@ -106,15 +119,20 @@ def get_next_button(driver: webdriver.Chrome):
     return None
 
 
-# ----------------- TEK ADIMLIK TARAYICI -----------------
+# ----------------- ONE CRAWL STEP -----------------
 
 def crawl_step(driver: webdriver.Chrome) -> bool:
+    """
+    Scrapes current page, clicks Next, returns True.
+    If cannot continue (CAPTCHA or last page), returns False.
+    """
+
     if not scrape_current_page(driver):
         return False
 
     next_btn = get_next_button(driver)
     if not next_btn:
-        print("[✓] Next butonu yok → Son sayfa olabilir.\n")
+        print("[✓] No 'Next' button → Last page reached.\n")
         return False
 
     next_btn.click()
@@ -122,23 +140,24 @@ def crawl_step(driver: webdriver.Chrome) -> bool:
     return True
 
 
-# ----------------- OTOMATİK TARAYICI -----------------
+# ----------------- FULL AUTO CRAWLER -----------------
 
 def crawl_until_last_page(driver: webdriver.Chrome):
-    print("[*] Otomatik tarama başladı...\n")
+    print("[*] Auto-crawl started...\n")
+
     step = 0
 
     while True:
         step += 1
-        print(f"[+] Adım {step} çalışıyor...")
+        print(f"[+] Step {step} running...")
 
         if not crawl_step(driver):
             break
 
-    print(f"[✓] Tarama tamamlandı. Toplam URL: {len(results)}\n")
+    print(f"[✓] Auto-crawl finished. Total URLs collected: {len(results)}\n")
 
 
-# ----------------- ANA PROGRAM -----------------
+# ----------------- MAIN PROGRAM -----------------
 
 def main():
     global results, seen
@@ -147,14 +166,16 @@ def main():
     driver.maximize_window()
     driver.get("https://www.google.com/ncr")
 
-    print("[*] Google açıldı.")
-    print("[*] Aramanı tarayıcıda manuel yap, ardından aşağıdaki komutları kullanabilirsin:\n")
-    print("Komutlar:")
-    print("  auto      → Next yok olana kadar otomatik tarama")
-    print("  show      → Toplanan URL'leri göster")
-    print("  save      → URL'leri success.txt'ye yaz")
-    print("  clear     → Listeyi ve hafızayı sıfırla")
-    print("  exit      → Çıkış\n")
+    print("[*] Google opened.")
+    print("[*] Perform your Google search manually in Chrome.")
+    print("[*] After the first results page loads, use these commands:\n")
+
+    print("Commands:")
+    print("  auto   → Start auto-crawling until last page")
+    print("  show   → Display collected URLs")
+    print("  save   → Save URLs to success.txt")
+    print("  clear  → Reset URL storage")
+    print("  exit   → Quit program\n")
 
     while True:
         cmd = input("> ").strip().lower()
@@ -163,37 +184,37 @@ def main():
             crawl_until_last_page(driver)
 
         elif cmd == "show":
-            print("\n=== TOPLANAN URL'LER ===")
+            print("\n=== COLLECTED URLS ===")
             if not results:
-                print("(Henüz URL toplanmadı)")
+                print("(No URLs collected yet)")
             else:
                 for u in results:
                     print("→", u)
-            print("========================\n")
+            print("=======================\n")
 
         elif cmd == "save":
             if not results:
-                print("[!] Kaydedilecek URL yok.\n")
+                print("[!] No URLs to save.\n")
                 continue
 
             with open("success.txt", "w", encoding="utf-8") as f:
                 for u in results:
                     f.write(u + "\n")
 
-            print(f"[+] success.txt dosyasına {len(results)} URL yazıldı.\n")
+            print(f"[+] Saved {len(results)} URLs to success.txt\n")
 
         elif cmd == "clear":
             results = []
             seen = set()
-            print("[*] Liste sıfırlandı.\n")
+            print("[*] URL list cleared.\n")
 
         elif cmd == "exit":
             driver.quit()
-            print("[*] Çıkılıyor...")
+            print("[*] Exiting...")
             break
 
         else:
-            print("[!] Bilinmeyen komut:", cmd)
+            print("[!] Unknown command:", cmd)
 
 
 if __name__ == "__main__":
