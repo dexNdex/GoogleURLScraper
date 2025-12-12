@@ -1,14 +1,14 @@
-python GURLScraper.py  → aracı çalıştır
+python google_crawler.py  → launch tool
 
-Google’da arama yap       → Chrome içinde manuel
+Perform search manually    → in Chrome
 
-auto                      → tüm sayfaları tara
-CAPTCHA gelirse: çöz + auto
+auto                       → scrape all pages
+CAPTCHA appears? solve it + auto again
 
-show                      → toplanan URL’leri gör
+show                       → display URLs
 
-save                      → success.txt’ye kaydet
+save                       → write URLs to success.txt
 
-clear                     → listeyi sıfırla
+clear                      → reset
 
-exit                      → çıkış
+exit                       → quit
